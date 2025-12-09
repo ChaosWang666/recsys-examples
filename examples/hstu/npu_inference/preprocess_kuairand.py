@@ -7,6 +7,7 @@ self contained.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import tarfile
 from dataclasses import dataclass
@@ -182,3 +183,30 @@ def preprocess_kuairand(
     with paths.metadata_file.open("w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
     return paths
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Preprocess KuaiRand data for NPU inference")
+    parser.add_argument("--dataset_name", type=str, default="kuairand-1k", help="Dataset preset to download")
+    parser.add_argument("--data_root", type=str, default="tmp_data", help="Root directory to store processed data")
+    parser.add_argument("--time_interval_s", type=int, default=300, help="Session boundary in seconds")
+    parser.add_argument("--max_sequences", type=int, default=1024, help="Maximum number of sequences to keep")
+    parser.add_argument("--max_sequence_length", type=int, default=256, help="Truncate sequences to this length")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = _parse_args()
+    paths = preprocess_kuairand(
+        dataset_name=args.dataset_name,
+        data_root=args.data_root,
+        time_interval_s=args.time_interval_s,
+        max_sequences=args.max_sequences,
+        max_sequence_length=args.max_sequence_length,
+    )
+    print(f"Preprocessed sequences written to: {paths.sequence_file}")
+    print(f"Metadata saved to: {paths.metadata_file}")
+
+
+if __name__ == "__main__":
+    main()

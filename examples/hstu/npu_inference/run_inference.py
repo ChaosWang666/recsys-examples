@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import time
 from typing import Dict, List
 
 import torch
 
-from .config import KVCacheConfig, ModelConfig
+from .config import KVCacheConfig, ModelConfig, get_config
 from .dataset import KuaiRandDataset, Sample, collate_samples
 from .model import build_model
 
@@ -20,7 +19,7 @@ def _parse_args() -> argparse.Namespace:
         "--config",
         type=str,
         default="kuairand_gr",
-        help="Name of the preset config module under npu_inference.config",
+        help="Name of the preset config inside npu_inference.config",
     )
     parser.add_argument("--steps", type=int, default=None, help="Number of batches to process")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size for inference")
@@ -50,14 +49,6 @@ def _load_checkpoint(model, path: str) -> None:
     else:
         state_dict = ckpt
     model.load_state_dict(state_dict, strict=False)
-
-
-def _load_config(config_name: str):
-    module = importlib.import_module(f"examples.hstu.npu_inference.config.{config_name}")
-    for attr in dir(module):
-        if attr.endswith("_CONFIG"):
-            return getattr(module, attr)
-    raise ValueError(f"Config {config_name} must expose a *_CONFIG object")
 
 
 def _update_config_with_args(config, args: argparse.Namespace):
@@ -108,7 +99,7 @@ def _run_batch(model, batch: Sample, top_k: int, dump_logits: bool):
 
 def main() -> None:
     args = _parse_args()
-    config = _load_config(args.config)
+    config = get_config(args.config)
     config = _update_config_with_args(config, args)
     dtype = config.model.dtype
 

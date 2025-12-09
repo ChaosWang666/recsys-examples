@@ -19,8 +19,8 @@ used independently from the rest of the repository.
 - [`dataset.py`](dataset.py) loads the processed KuaiRand sessions and
   exposes batches that include user ids, token sequences, and ranking
   targets so the inference path can report benchmark-style metrics.
-- Preset hyperparameters inspired by `examples/hstu/configs` live under
-  [`config/`](config), keeping runtime configuration local to this
+- Preset hyperparameters inspired by `examples/hstu/configs` live in
+  [`config.py`](config.py), keeping runtime configuration local to this
   directory.
 
 ## Quick start
