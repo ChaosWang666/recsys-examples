@@ -4,7 +4,8 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from typing import Dict, List
+from pathlib import Path
+from typing import Dict, List, Tuple
 
 import torch
 
@@ -63,6 +64,18 @@ def _update_config_with_args(config, args: argparse.Namespace):
     return config
 
 
+def _resolve_checkpoint_path(config, args: argparse.Namespace) -> Tuple[str | None, bool]:
+    path = args.checkpoint or config.model.checkpoint_path
+    if path is None:
+        return None, False
+    ckpt_path = Path(path)
+    if not ckpt_path.exists():
+        raise FileNotFoundError(
+            f"Checkpoint {ckpt_path} not found. Download the model before running inference."
+        )
+    return str(ckpt_path), True
+
+
 def _benchmark_metrics(latencies: List[float], hits: List[int], count: int) -> Dict[str, float]:
     if count == 0:
         return {}
@@ -119,8 +132,11 @@ def main() -> None:
         num_layers=config.kv_cache.num_layers,
     )
     model = build_model(model_config, kv_config, device=config.device)
-    if args.checkpoint:
-        _load_checkpoint(model, args.checkpoint)
+    checkpoint_path, model_downloaded = _resolve_checkpoint_path(config, args)
+    if checkpoint_path:
+        _load_checkpoint(model, checkpoint_path)
+    else:
+        print("No checkpoint provided; using randomly initialized weights.")
     model.eval()
 
     steps = args.steps or len(dataset)
@@ -156,6 +172,8 @@ def main() -> None:
         "num_batches": processed_batches,
         "batch_size": batch_size,
         "vocab_size": vocab_size,
+        "model_checkpoint": checkpoint_path,
+        "model_downloaded": model_downloaded,
         "total_time_s": total_time,
     }
     summary.update(_benchmark_metrics(latencies, hits, processed_batches))

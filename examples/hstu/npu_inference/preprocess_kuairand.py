@@ -18,11 +18,11 @@ from urllib.request import urlretrieve
 import pandas as pd
 
 _DOWNLOAD_URLS: Dict[str, str] = {
-    "kuairand-1k": "https://zenodo.org/records/10439422/files/KuaiRand-1K.tar.gz",
+    "KuaiRand-1K": "https://zenodo.org/records/10439422/files/KuaiRand-1K.tar.gz",
 }
 
 _LOG_FILES: Dict[str, List[str]] = {
-    "kuairand-1k": [
+    "KuaiRand-1K": [
         "log_standard_4_08_to_4_21_1k.csv",
         "log_standard_4_22_to_5_08_1k.csv",
     ],
@@ -187,7 +187,7 @@ def preprocess_kuairand(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Preprocess KuaiRand data for NPU inference")
-    parser.add_argument("--dataset_name", type=str, default="kuairand-1k", help="Dataset preset to download")
+    parser.add_argument("--dataset_name", type=str, default="KuaiRand-1K", help="Dataset preset to download")
     parser.add_argument("--data_root", type=str, default="tmp_data", help="Root directory to store processed data")
     parser.add_argument("--time_interval_s", type=int, default=300, help="Session boundary in seconds")
     parser.add_argument("--max_sequences", type=int, default=1024, help="Maximum number of sequences to keep")

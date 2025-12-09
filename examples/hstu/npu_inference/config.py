@@ -19,6 +19,7 @@ class ModelConfig:
     dropout: float = 0.0
     max_position_embeddings: int = 1024
     dtype: torch.dtype = torch.bfloat16
+    checkpoint_path: Optional[str] = None
 
 
 @dataclass
@@ -33,7 +34,7 @@ class KVCacheConfig:
 class DatasetConfig:
     """Configuration for KuaiRand benchmark preparation and loading."""
 
-    dataset_name: str = "kuairand-1k"
+    dataset_name: str = "KuaiRand-1K"
     data_root: str = "tmp_data"
     time_interval_s: int = 300
     max_sequences: int = 512
@@ -76,7 +77,7 @@ KUAI_RAND_GR_CONFIG = InferenceConfig(
     ),
     kv_cache=KVCacheConfig(max_cache_length=4096, num_layers=6),
     dataset=DatasetConfig(
-        dataset_name="kuairand-1k",
+        dataset_name="KuaiRand-1K",
         data_root="tmp_data",
         time_interval_s=300,
         max_sequences=1024,

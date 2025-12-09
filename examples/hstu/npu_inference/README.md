@@ -25,19 +25,28 @@ used independently from the rest of the repository.
 
 ## Quick start
 
-The first run downloads and preprocesses the KuaiRand-1K dataset into
-`examples/hstu/npu_inference/tmp_data`. Subsequent runs reuse the
-cached files.
+1. Preprocess KuaiRand-1K once (downloads to `tmp_data/KuaiRand-1K`):
+
+```bash
+python -m examples.hstu.npu_inference.preprocess_kuairand \
+  --dataset_name "KuaiRand-1K" \
+  --data_root tmp_data
+```
+
+2. Run inference on the generated benchmark data:
 
 ```bash
 python -m examples.hstu.npu_inference.run_inference \
   --config kuairand_gr \
   --steps 4 \
-  --device npu
+  --device npu \
+  --checkpoint /path/to/downloaded/model.pt
 ```
 
 Use `--dump_logits` to print output tensor shapes for debugging or
-`--checkpoint` to load a saved PyTorch state dict.
+`--checkpoint` to load a saved PyTorch state dict. If no checkpoint is
+provided the script reports that random weights are used so you can
+verify model downloads before benchmarking.
 
 ## Benchmark output
 

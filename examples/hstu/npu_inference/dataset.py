@@ -10,7 +10,6 @@ import pandas as pd
 import torch
 
 from .config import DatasetConfig
-from .preprocess_kuairand import preprocess_kuairand
 
 
 @dataclass
@@ -27,15 +26,15 @@ class KuaiRandDataset:
     def __init__(self, cfg: DatasetConfig, sequence_length: int) -> None:
         self.cfg = cfg
         self.sequence_length = sequence_length
-        paths = preprocess_kuairand(
-            dataset_name=cfg.dataset_name,
-            data_root=cfg.data_root,
-            time_interval_s=cfg.time_interval_s,
-            max_sequences=cfg.max_sequences,
-            max_sequence_length=cfg.max_sequence_length,
-        )
-        self.sequence_file = paths.sequence_file
-        self.metadata = json.loads(Path(paths.metadata_file).read_text())
+        dataset_dir = Path(cfg.data_root) / cfg.dataset_name
+        self.sequence_file = dataset_dir / "processed_inference_sequences.csv"
+        metadata_file = dataset_dir / "metadata.json"
+        if not self.sequence_file.exists() or not metadata_file.exists():
+            raise FileNotFoundError(
+                "Processed KuaiRand data not found. "
+                "Run preprocess_kuairand.py before starting inference."
+            )
+        self.metadata = json.loads(metadata_file.read_text())
         self._frame = pd.read_csv(self.sequence_file)
 
     @property
