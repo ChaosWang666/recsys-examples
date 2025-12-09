@@ -33,7 +33,6 @@ class KVCacheConfig:
     num_layers: Optional[int] = None
 
 
-@dataclass
 class InferenceConfig:
     """Top level configuration for running inference."""
 
