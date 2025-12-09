@@ -1,40 +1,40 @@
-"""Entry point for running HSTU inference on NPU/CPU.
-
-The script mirrors the structure of ``examples/hstu/inference`` but is
-self contained and free from GPU specific dependencies.  A lightweight
-synthetic dataset is used to demonstrate incremental KV cache behaviour.
-"""
+"""Entry point for running HSTU inference on NPU/CPU."""
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
+import time
 from typing import Dict, List
 
 import torch
 
 from .config import KVCacheConfig, ModelConfig
-from .dataset import SyntheticDataset, collate_samples
+from .dataset import KuaiRandDataset, Sample, collate_samples
 from .model import build_model
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run HSTU inference on NPU/CPU")
-    parser.add_argument("--steps", type=int, default=4, help="Number of batches to process")
-    parser.add_argument("--batch_size", type=int, default=1, help="Batch size for inference")
-    parser.add_argument("--sequence_length", type=int, default=16, help="Number of tokens per request")
-    parser.add_argument("--num_users", type=int, default=8, help="Number of synthetic users")
-    parser.add_argument("--vocab_size", type=int, default=5000, help="Vocabulary size")
-    parser.add_argument("--hidden_size", type=int, default=256, help="Hidden size of the model")
-    parser.add_argument("--num_layers", type=int, default=2, help="Number of transformer layers")
-    parser.add_argument("--num_heads", type=int, default=4, help="Attention heads per layer")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="kuairand_gr",
+        help="Name of the preset config module under npu_inference.config",
+    )
+    parser.add_argument("--steps", type=int, default=None, help="Number of batches to process")
+    parser.add_argument("--batch_size", type=int, default=None, help="Batch size for inference")
+    parser.add_argument("--sequence_length", type=int, default=None, help="Number of tokens per request")
     parser.add_argument("--device", type=str, default=None, help="Target device (npu/cpu/cuda)")
-    parser.add_argument("--dtype", type=str, default="bfloat16", help="Computation dtype")
+    parser.add_argument("--dtype", type=str, default=None, help="Computation dtype override")
     parser.add_argument("--checkpoint", type=str, default=None, help="Optional path to a saved state dict")
     parser.add_argument("--dump_logits", action="store_true", help="Print logits for debugging")
     return parser.parse_args()
 
 
-def _dtype_from_string(name: str) -> torch.dtype:
+def _dtype_from_string(name: str | None, default: torch.dtype) -> torch.dtype:
+    if name is None:
+        return default
     name = name.lower()
     if name in {"bf16", "bfloat16"}:
         return torch.bfloat16
@@ -52,46 +52,122 @@ def _load_checkpoint(model, path: str) -> None:
     model.load_state_dict(state_dict, strict=False)
 
 
+def _load_config(config_name: str):
+    module = importlib.import_module(f"examples.hstu.npu_inference.config.{config_name}")
+    for attr in dir(module):
+        if attr.endswith("_CONFIG"):
+            return getattr(module, attr)
+    raise ValueError(f"Config {config_name} must expose a *_CONFIG object")
+
+
+def _update_config_with_args(config, args: argparse.Namespace):
+    if args.batch_size:
+        config.batch_size = args.batch_size
+    if args.sequence_length:
+        config.sequence_length = args.sequence_length
+    if args.device:
+        config.device = args.device
+    if args.dtype:
+        config.model.dtype = _dtype_from_string(args.dtype, config.model.dtype)
+    return config
+
+
+def _benchmark_metrics(latencies: List[float], hits: List[int], count: int) -> Dict[str, float]:
+    if count == 0:
+        return {}
+    avg_latency = sum(latencies) / count
+    return {
+        "requests": count,
+        "avg_latency_ms": avg_latency * 1000,
+        "p50_latency_ms": sorted(latencies)[int(0.5 * count)] * 1000,
+        "hit_rate": sum(hits) / max(1, len(hits)),
+        "throughput_rps": count / sum(latencies),
+    }
+
+
+def _summarize_topk(logits: torch.Tensor, targets: torch.Tensor, top_k: int) -> Dict[str, List[int]]:
+    last_logits = logits[-1]
+    values, indices = torch.topk(last_logits, k=top_k, dim=-1)
+    hits = []
+    summaries: List[Dict[str, int]] = []
+    for b in range(indices.shape[0]):
+        topk_tokens = indices[b].tolist()
+        target_token = int(targets[b])
+        hits.append(1 if target_token in topk_tokens else 0)
+        summaries.append({"target": target_token, "topk": topk_tokens})
+    return {"hits": hits, "summaries": summaries}
+
+
+def _run_batch(model, batch: Sample, top_k: int, dump_logits: bool):
+    logits = model(batch.tokens, batch.user_id)
+    if dump_logits:
+        print(f"Logits shape: {tuple(logits.shape)}")
+    metrics = _summarize_topk(logits, batch.target, top_k)
+    return logits, metrics
+
+
 def main() -> None:
     args = _parse_args()
-    dtype = _dtype_from_string(args.dtype)
+    config = _load_config(args.config)
+    config = _update_config_with_args(config, args)
+    dtype = config.model.dtype
 
+    dataset = KuaiRandDataset(config.dataset, config.sequence_length)
+    vocab_size = dataset.vocab_size or config.model.vocab_size
     model_config = ModelConfig(
-        vocab_size=args.vocab_size,
-        hidden_size=args.hidden_size,
-        num_layers=args.num_layers,
-        num_heads=args.num_heads,
+        vocab_size=vocab_size,
+        hidden_size=config.model.hidden_size,
+        num_layers=config.model.num_layers,
+        num_heads=config.model.num_heads,
+        dropout=config.model.dropout,
+        max_position_embeddings=config.model.max_position_embeddings,
         dtype=dtype,
     )
-    kv_config = KVCacheConfig(max_cache_length=args.sequence_length * 4, num_layers=args.num_layers)
-    model = build_model(model_config, kv_config, device=args.device)
+    kv_config = KVCacheConfig(
+        max_cache_length=config.kv_cache.max_cache_length,
+        num_layers=config.kv_cache.num_layers,
+    )
+    model = build_model(model_config, kv_config, device=config.device)
     if args.checkpoint:
         _load_checkpoint(model, args.checkpoint)
     model.eval()
 
-    dataset = SyntheticDataset(
-        num_users=args.num_users,
-        vocab_size=args.vocab_size,
-        sequence_length=args.sequence_length,
-        steps=args.steps,
-    )
-
-    results: List[Dict[str, torch.Tensor]] = []
+    steps = args.steps or len(dataset)
     iterator = iter(dataset)
-    for _ in range(args.steps):
-        batch_samples = [next(iterator) for _ in range(args.batch_size)]
-        batch = collate_samples(batch_samples, device=model.device)
-        user_ids = batch.user_id if isinstance(batch.user_id, torch.Tensor) else torch.tensor([batch.user_id], device=model.device)
-        logits = model(batch.tokens, user_ids)
-        start_pos, cached_len = model.get_cache_info(user_ids)
-        results.append({"start_pos": start_pos.cpu(), "cached_len": cached_len.cpu()})
-        if args.dump_logits:
-            print(f"Logits shape: {tuple(logits.shape)}")
+    results: List[Dict[str, torch.Tensor]] = []
+    latencies: List[float] = []
+    hits: List[int] = []
+    batch_size = config.batch_size
+    processed_batches = 0
 
+    start_time = time.perf_counter()
+    for _ in range(steps):
+        batch_samples = []
+        try:
+            for _ in range(batch_size):
+                batch_samples.append(next(iterator))
+        except StopIteration:
+            break
+        batch = collate_samples(batch_samples, device=model.device)
+        t0 = time.perf_counter()
+        logits, metrics = _run_batch(model, batch, config.benchmark.top_k, args.dump_logits)
+        t1 = time.perf_counter()
+        latencies.append(t1 - t0)
+        hits.extend(metrics["hits"])
+        start_pos, cached_len = model.get_cache_info(batch.user_id)
+        results.append({"start_pos": start_pos.cpu(), "cached_len": cached_len.cpu(), "topk": metrics["summaries"]})
+        processed_batches += 1
+
+    total_time = time.perf_counter() - start_time
     summary = {
-        "num_requests": len(results),
-        "cache_lengths": [int(r["cached_len"][i]) for r in results for i in range(r["cached_len"].numel())],
+        "config": args.config,
+        "dataset": config.dataset.dataset_name,
+        "num_batches": processed_batches,
+        "batch_size": batch_size,
+        "vocab_size": vocab_size,
+        "total_time_s": total_time,
     }
+    summary.update(_benchmark_metrics(latencies, hits, processed_batches))
     print(json.dumps(summary, indent=2))
 
 
