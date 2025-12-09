@@ -33,6 +33,25 @@ class KVCacheConfig:
     num_layers: Optional[int] = None
 
 
+@dataclass
+class DatasetConfig:
+    """Configuration for KuaiRand benchmark preparation and loading."""
+
+    dataset_name: str = "kuairand-1k"
+    data_root: str = "tmp_data"
+    time_interval_s: int = 300
+    max_sequences: int = 512
+    max_sequence_length: int = 256
+
+
+@dataclass
+class BenchmarkConfig:
+    """Options that control benchmark style output for ranking."""
+
+    top_k: int = 5
+    warmup_batches: int = 1
+
+
 class InferenceConfig:
     """Top level configuration for running inference."""
 
@@ -41,3 +60,5 @@ class InferenceConfig:
     device: Optional[str] = None
     model: ModelConfig = ModelConfig()
     kv_cache: KVCacheConfig = KVCacheConfig()
+    dataset: DatasetConfig = DatasetConfig()
+    benchmark: BenchmarkConfig = BenchmarkConfig()
